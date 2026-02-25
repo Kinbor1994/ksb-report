@@ -1,0 +1,35 @@
+[project]
+name = "ksb-report"
+version = "0.1.0"
+description = "API + bibliothèque Python pour générer des rapports PDF 100% personnalisables"
+authors = [
+    {name = "KINNOUME S. Borel", email = "kinnoumeb@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "fpdf2>=2.8.4,<3.0.0",
+    "pydantic>=2.0.0,<3.0.0",
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.30.0,<1.0.0",
+    "qrcode[pil]>=8.0,<9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+    "httpx>=0.27.0,<1.0.0",
+]
+
+[project.scripts]
+ksb-report = "ksb_report.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ksb_report"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

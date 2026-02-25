@@ -1,0 +1,116 @@
+{
+    "title": "Rapport de démonstration",
+    "title_font_size": 16,
+    "title_align": "C",
+    "page": {
+        "orientation": "portrait",
+        "format": "A4",
+        "margins": {
+            "top": 15,
+            "bottom": 15,
+            "left": 15,
+            "right": 15
+        }
+    },
+    "header": {
+        "enabled": true,
+        "lines": [
+            {"text": "KSB Technologies", "font_size": 16, "bold": true, "align": "C"},
+            {"text": "Département Ingénierie", "font_size": 10, "italic": true, "align": "C"}
+        ],
+        "separator_line": true
+    },
+    "footer": {
+        "left_text": "KSB Technologies — Confidentiel",
+        "show_page_number": true,
+        "show_date": true
+    },
+    "elements": [
+        {
+            "type": "spacer",
+            "height": 5
+        },
+        {
+            "type": "key_value",
+            "pairs": [
+                ["Référence", "RPT-2026-001"],
+                ["Date", "25/02/2026"],
+                ["Auteur", "Borel KINNOUME"]
+            ],
+            "label_width": 35,
+            "font_size": 11
+        },
+        {
+            "type": "spacer",
+            "height": 8
+        },
+        {
+            "type": "section_title",
+            "text": "I. RÉSUMÉ EXÉCUTIF",
+            "bg_color": [41, 128, 185],
+            "text_color": [255, 255, 255]
+        },
+        {
+            "type": "text",
+            "content": "Ce rapport présente les résultats de l'analyse trimestrielle des performances. Les indicateurs clés montrent une progression significative par rapport au trimestre précédent, avec une croissance de 15% du chiffre d'affaires et une amélioration de la satisfaction client.",
+            "font_size": 11
+        },
+        {
+            "type": "spacer",
+            "height": 5
+        },
+        {
+            "type": "section_title",
+            "text": "II. DONNÉES CHIFFRÉES",
+            "bg_color": [41, 128, 185],
+            "text_color": [255, 255, 255]
+        },
+        {
+            "type": "table",
+            "headers": ["Indicateur", "T1 2025", "T2 2025", "T3 2025", "T4 2025", "Évolution"],
+            "rows": [
+                ["Chiffre d'affaires", "120 000 €", "135 000 €", "142 000 €", "163 300 €", "+15%"],
+                ["Nombre de clients", "45", "52", "58", "67", "+15.5%"],
+                ["Satisfaction client", "7.2/10", "7.5/10", "8.0/10", "8.4/10", "+5%"],
+                ["Taux de rétention", "82%", "85%", "87%", "91%", "+4.6%"],
+                ["Délai moyen livraison", "5.2 jours", "4.8 jours", "4.3 jours", "3.9 jours", "-9.3%"]
+            ],
+            "header_bg_color": [41, 128, 185],
+            "header_text_color": [255, 255, 255],
+            "striped_rows": true,
+            "font_size": 10,
+            "header_font_size": 10
+        },
+        {
+            "type": "spacer",
+            "height": 5
+        },
+        {
+            "type": "section_title",
+            "text": "III. CONCLUSION",
+            "bg_color": [41, 128, 185],
+            "text_color": [255, 255, 255]
+        },
+        {
+            "type": "text",
+            "content": "Les résultats du quatrième trimestre confirment la tendance positive observée tout au long de l'année. Les actions correctives mises en place au T2 portent leurs fruits avec une amélioration continue de tous les indicateurs clés.",
+            "font_size": 11
+        },
+        {
+            "type": "spacer",
+            "height": 5
+        },
+        {
+            "type": "text",
+            "content": "Recommandation : Maintenir les investissements en formation et continuer le programme d'amélioration de la qualité de service.",
+            "font_size": 11,
+            "font_style": "BI",
+            "align": "L"
+        }
+    ],
+    "metadata": {
+        "filename": "rapport_demo.pdf",
+        "type": "quarterly_report",
+        "author": "Borel KINNOUME"
+    }
+}
