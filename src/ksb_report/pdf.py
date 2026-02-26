@@ -6,7 +6,10 @@ Inspired by school_desk's BulletinFPDF and CustomFPDF, but fully decoupled.
 
 from __future__ import annotations
 
+import io
+import math
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -19,6 +22,8 @@ if TYPE_CHECKING:
         FooterConfig,
         HeaderConfig,
         ReportTemplate,
+        SignatureEntry,
+        WatermarkConfig,
     )
 
 FONTS_DIR = Path(__file__).parent / "fonts"
@@ -32,11 +37,14 @@ class ReportFPDF(FPDF):
 
     def __init__(self, template: ReportTemplate):
         orientation = "L" if template.page.orientation == "landscape" else "P"
-        super().__init__(orientation=orientation, unit="mm", format=template.page.format)
+        super().__init__(
+            orientation=orientation, unit="mm", format=template.page.format
+        )
 
         self.template = template
         self._font_family_name = template.font.family
         self._fonts_loaded = False
+        self._qrcode_tmp_files: list[str] = []
 
         # Margins
         m = template.page.margins
@@ -162,14 +170,18 @@ class ReportFPDF(FPDF):
                 style += "I"
             self.set_font(self.font_name, style, line.font_size)
             self.set_xy(text_x_start, current_y)
-            self.multi_cell(text_width, line.font_size * 0.5, line.text, align=line.align)
+            self.multi_cell(
+                text_width, line.font_size * 0.5, line.text, align=line.align
+            )
             current_y = self.get_y()
 
         # Separator line
         header_bottom = max(current_y, logo_y + hdr.logo_height) + 2
         if hdr.separator_line:
             self.set_draw_color(0, 0, 0)
-            self.line(self.l_margin, header_bottom, self.w - self.r_margin, header_bottom)
+            self.line(
+                self.l_margin, header_bottom, self.w - self.r_margin, header_bottom
+            )
 
         self.set_y(header_bottom + 3)
 
@@ -203,10 +215,11 @@ class ReportFPDF(FPDF):
         self.cell(0, 5, left_text, align="L")
 
         # Right text (page number)
-        right_text = ftr.right_text or f"Page {self.page_no()}/{{nb}}"
-        right_text = right_text.replace("{page}", str(self.page_no()))
-        right_text = right_text.replace("{pages}", str(self.pages_count))
-        self.cell(0, 5, right_text, align="R")
+        if ftr.show_page_number:
+            right_text = ftr.right_text or f"Page {self.page_no()}/{{nb}}"
+            right_text = right_text.replace("{page}", str(self.page_no()))
+            right_text = right_text.replace("{pages}", str(self.pages_count))
+            self.cell(0, 5, right_text, align="R")
 
         # Color bar at bottom
         if ftr.color_bar and ftr.color_bar.position in ("bottom", "both"):
@@ -228,9 +241,7 @@ class ReportFPDF(FPDF):
             self.set_fill_color(*color)
             self.rect(x_start + i * bar_width, y, bar_width, config.height, "F")
 
-    def _draw_logo_placeholder(
-        self, x: float, y: float, w: float, h: float
-    ) -> None:
+    def _draw_logo_placeholder(self, x: float, y: float, w: float, h: float) -> None:
         """Draw a placeholder rectangle where a logo should be."""
         self.set_draw_color(200, 200, 200)
         self.rect(x, y, w, h)
@@ -326,12 +337,358 @@ class ReportFPDF(FPDF):
         except Exception:
             self._draw_logo_placeholder(x, self.get_y(), width or 40, height or 30)
 
+    # =========================================================================
+    # Separator
+    # =========================================================================
+    def render_separator(
+        self,
+        color: tuple[int, int, int] = (200, 200, 200),
+        thickness: float = 0.5,
+        margin_top: float = 3,
+        margin_bottom: float = 3,
+        width_percent: float = 100,
+    ) -> None:
+        """Render a horizontal line separator."""
+        self.ln(margin_top)
+        available = self.w - self.l_margin - self.r_margin
+        line_width = available * (width_percent / 100)
+        x_start = self.l_margin + (available - line_width) / 2
+        y = self.get_y()
+        self.set_draw_color(*color)
+        self.set_line_width(thickness)
+        self.line(x_start, y, x_start + line_width, y)
+        self.set_line_width(0.2)  # Reset
+        self.ln(margin_bottom)
+
+    # =========================================================================
+    # List (bullet / numbered / dash)
+    # =========================================================================
+    def render_list(
+        self,
+        items: list[str],
+        list_style: str = "bullet",
+        font_size: float = 11,
+        indent: float = 10,
+        color: tuple[int, int, int] | None = None,
+        spacing: float = 2,
+    ) -> None:
+        """Render a bulleted, numbered, or dashed list."""
+        if color:
+            self.set_text_color(*color)
+        self.set_font(self.font_name, "", font_size)
+
+        bullet_chars = {"bullet": "•", "dash": "–", "numbered": ""}
+
+        for i, item_text in enumerate(items, 1):
+            if list_style == "numbered":
+                marker = f"{i}."
+            else:
+                marker = bullet_chars.get(list_style, "•")
+
+            x_start = self.l_margin + indent
+            self.set_x(x_start)
+
+            # Draw marker
+            marker_width = self.get_string_width(marker + " ") + 2
+            self.cell(marker_width, font_size * 0.5, f"{marker} ")
+
+            # Draw text with wrapping
+            text_width = self.w - self.r_margin - self.get_x()
+            self.multi_cell(text_width, font_size * 0.5, item_text, align="L")
+            self.ln(spacing)
+
+        if color:
+            self.set_text_color(0, 0, 0)
+        self.ln(2)
+
+    # =========================================================================
+    # Box (bordered container)
+    # =========================================================================
+    def render_box(
+        self,
+        render_elements_fn,
+        elements: list,
+        border_color: tuple[int, int, int] = (0, 0, 0),
+        bg_color: tuple[int, int, int] | None = None,
+        border_width: float = 0.5,
+        padding: float = 5,
+        corner_radius: float = 0,
+    ) -> None:
+        """
+        Render a bordered box with nested elements.
+        Strategy: estimate a minimum height, draw box background first,
+        then render content once on top.
+        """
+        x = self.l_margin
+        available_width = self.w - self.l_margin - self.r_margin
+
+        # Estimate minimum box height (generous default)
+        min_box_height = padding * 2 + 10
+
+        # If not enough space, force a page break
+        if self.get_y() + min_box_height > self.h - self.b_margin:
+            self.add_page()
+
+        saved_y = self.get_y()
+
+        # Draw background / border FIRST (we'll adjust height after)
+        # Use a placeholder height — we'll overdraw the border after content
+        self.set_draw_color(*border_color)
+        self.set_line_width(border_width)
+
+        # Render content inside the box with adjusted margins
+        old_l_margin = self.l_margin
+        old_r_margin = self.r_margin
+        self.l_margin = x + padding
+        self.r_margin = self.r_margin + padding
+        self.set_xy(x + padding, saved_y + padding)
+
+        for element in elements:
+            render_elements_fn(element)
+
+        content_bottom = self.get_y() + padding
+
+        # Restore margins
+        self.l_margin = old_l_margin
+        self.r_margin = old_r_margin
+
+        # Now draw the box border/background at the correct height
+        box_height = content_bottom - saved_y
+
+        if bg_color:
+            self.set_fill_color(*bg_color)
+            style = "DF"
+        else:
+            style = "D"
+
+        # Draw behind the content (using rect which goes under text)
+        if corner_radius > 0:
+            self.round_rect(
+                x, saved_y, available_width, box_height, corner_radius, style=style
+            )
+        else:
+            self.rect(x, saved_y, available_width, box_height, style)
+
+        self.set_line_width(0.2)  # Reset
+
+        # Re-render the content on top of the background
+        self.l_margin = x + padding
+        self.r_margin = old_r_margin + padding
+        self.set_xy(x + padding, saved_y + padding)
+
+        for element in elements:
+            render_elements_fn(element)
+
+        self.l_margin = old_l_margin
+        self.r_margin = old_r_margin
+        self.set_y(content_bottom + 3)
+
+    # =========================================================================
+    # Columns (multi-column layout)
+    # =========================================================================
+    def render_columns(
+        self,
+        render_elements_fn,
+        columns: list,
+        gap: float = 5,
+    ) -> None:
+        """
+        Render content in side-by-side columns.
+        Handles page break awareness: if not enough vertical space,
+        forces a page break before starting the columns.
+        """
+        available_width = self.w - self.l_margin - self.r_margin
+        total_gap = gap * (len(columns) - 1) if len(columns) > 1 else 0
+        usable_width = available_width - total_gap
+
+        # Calculate column widths from percentages
+        total_percent = sum(col.width for col in columns)
+        col_widths = [(col.width / total_percent) * usable_width for col in columns]
+
+        # Estimate minimum height needed (heuristic: count elements)
+        max_elements = max(len(col.elements) for col in columns) if columns else 0
+        min_height = max(30, max_elements * 12)  # ~12mm per element minimum
+
+        # If not enough space remaining, force a page break first
+        space_left = self.h - self.b_margin - self.get_y()
+        if space_left < min_height:
+            self.add_page()
+
+        start_y = self.get_y()
+        start_page = self.page
+        max_bottom_y = start_y
+
+        old_l_margin = self.l_margin
+        old_r_margin = self.r_margin
+        old_x = self.l_margin
+
+        current_x = self.l_margin
+
+        for i, col in enumerate(columns):
+            col_width = col_widths[i]
+
+            # Set position and margins for this column
+            self.set_xy(current_x, start_y)
+            self.l_margin = current_x
+            self.r_margin = self.w - (current_x + col_width)
+
+            # Disable auto page break inside columns to prevent split
+            old_auto_break = self.auto_page_break
+            self.auto_page_break = False
+
+            # Render elements inside this column
+            for element in col.elements:
+                render_elements_fn(element)
+
+            self.auto_page_break = old_auto_break
+
+            # Track the max bottom position (only if still on same page)
+            if self.page == start_page:
+                max_bottom_y = max(max_bottom_y, self.get_y())
+            else:
+                # Column overflowed to next page — track on new page
+                max_bottom_y = max(max_bottom_y, self.get_y())
+
+            # Move to next column position
+            current_x += col_width + gap
+
+        # Restore margins and position
+        self.l_margin = old_l_margin
+        self.r_margin = old_r_margin
+        self.set_y(max_bottom_y + 3)
+
+    # =========================================================================
+    # QR Code
+    # =========================================================================
+    def render_qrcode(
+        self,
+        data: str,
+        size: float = 30,
+        align: str = "C",
+    ) -> None:
+        """Generate and render a QR code from text data."""
+        try:
+            import qrcode
+            from qrcode.image.pil import PilImage
+
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+                box_size=10,
+                border=1,
+            )
+            qr.add_data(data)
+            qr.make(fit=True)
+
+            img = qr.make_image(fill_color="black", back_color="white")
+
+            # Save to temporary file
+            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+            img.save(tmp, format="PNG")
+            tmp.close()
+            self._qrcode_tmp_files.append(tmp.name)
+
+            # Position — respect current margins (important inside columns)
+            available_width = self.w - self.l_margin - self.r_margin
+            x = self.l_margin
+            if align == "C":
+                x = self.l_margin + (available_width - size) / 2
+            elif align == "R":
+                x = self.w - self.r_margin - size
+
+            self.image(tmp.name, x=x, y=self.get_y(), w=size, h=size)
+            self.ln(size + 3)
+
+        except ImportError:
+            # qrcode not installed — draw placeholder
+            self.render_text(f"[QR: {data}]", font_size=8, align=align)
+        except Exception:
+            self.render_text(f"[QR Error: {data}]", font_size=8, align=align)
+
+    # =========================================================================
+    # Signature Block
+    # =========================================================================
+    def render_signature_block(
+        self,
+        signatures: list[SignatureEntry],
+        line_width: float = 40,
+        spacing_top: float = 15,
+    ) -> None:
+        """Render signature blocks side by side."""
+        if not signatures:
+            return
+
+        available_width = self.w - self.l_margin - self.r_margin
+        block_width = available_width / len(signatures)
+        start_y = self.get_y()
+
+        for i, sig in enumerate(signatures):
+            block_x = self.l_margin + i * block_width
+            center_x = block_x + block_width / 2
+
+            # Label (e.g. "Le Directeur")
+            self.set_font(self.font_name, "B", 10)
+            self.set_xy(block_x, start_y)
+            self.cell(block_width, 5, sig.label, align="C")
+
+            # Title (optional, e.g. "Directeur Général")
+            if sig.title:
+                self.set_font(self.font_name, "I", 9)
+                self.set_xy(block_x, start_y + 5)
+                self.cell(block_width, 4, sig.title, align="C")
+
+            # Spacing for actual signature
+            line_y = start_y + 5 + (5 if sig.title else 0) + spacing_top
+
+            # Signature line
+            line_x = center_x - line_width / 2
+            self.set_draw_color(0, 0, 0)
+            self.line(line_x, line_y, line_x + line_width, line_y)
+
+            # Name below line
+            if sig.name:
+                self.set_font(self.font_name, "", 10)
+                self.set_xy(block_x, line_y + 2)
+                self.cell(block_width, 5, sig.name, align="C")
+
+        # Move Y below the signature blocks
+        max_y = (
+            start_y
+            + 5
+            + (5 if any(s.title for s in signatures) else 0)
+            + spacing_top
+            + 10
+        )
+        self.set_y(max_y + 3)
+
+    # =========================================================================
+    # Watermark
+    # =========================================================================
+    def render_watermark(self, watermark: WatermarkConfig) -> None:
+        """Draw a diagonal watermark text on the current page."""
+        self.set_font(self.font_name, "B", watermark.font_size)
+        self.set_text_color(*watermark.color)
+
+        # Calculate position for centered text
+        text_width = self.get_string_width(watermark.text)
+        x = (self.w - text_width) / 2
+        y = self.h / 2
+
+        with self.rotation(watermark.angle, x + text_width / 2, y):
+            self.text(x, y, watermark.text)
+
+        self.set_text_color(0, 0, 0)
+
+    # =========================================================================
+    # Table (with column alignment support)
+    # =========================================================================
     def render_table(
         self,
         headers: list[str],
         rows: list[list[str]],
         column_widths: list[float] | None = None,
         column_types: list[str] | None = None,
+        column_aligns: list[str] | None = None,
         header_bg_color: tuple[int, int, int] = (70, 130, 180),
         header_text_color: tuple[int, int, int] = (255, 255, 255),
         striped_rows: bool = True,
@@ -354,6 +711,12 @@ class ReportFPDF(FPDF):
             headers, column_widths, column_types, available_width
         )
 
+        # Default alignments: center for headers, left for data
+        aligns = column_aligns or ["L"] * len(headers)
+        # Pad if not enough alignments specified
+        while len(aligns) < len(headers):
+            aligns.append("L")
+
         def draw_table_headers() -> None:
             self.set_font(self.font_name, "B", header_font_size)
             self.set_fill_color(*header_bg_color)
@@ -363,7 +726,11 @@ class ReportFPDF(FPDF):
             max_lines = 1
             for i, hdr_text in enumerate(headers):
                 lines = self.multi_cell(
-                    col_widths[i] - 2, line_height, hdr_text, dry_run=True, output="LINES"
+                    col_widths[i] - 2,
+                    line_height,
+                    hdr_text,
+                    dry_run=True,
+                    output="LINES",
                 )
                 max_lines = max(max_lines, len(lines))
             header_height = max_lines * line_height + 4
@@ -375,14 +742,21 @@ class ReportFPDF(FPDF):
             for i, cw in enumerate(col_widths):
                 self.rect(
                     x_start + sum(col_widths[:i]),
-                    y_start, cw, header_height, style="DF"
+                    y_start,
+                    cw,
+                    header_height,
+                    style="DF",
                 )
 
             # Draw header text centered vertically
             for i, hdr_text in enumerate(headers):
                 cell_x = x_start + sum(col_widths[:i])
                 lines = self.multi_cell(
-                    col_widths[i] - 2, line_height, hdr_text, dry_run=True, output="LINES"
+                    col_widths[i] - 2,
+                    line_height,
+                    hdr_text,
+                    dry_run=True,
+                    output="LINES",
                 )
                 text_h = len(lines) * line_height
                 y_pos = y_start + (header_height - text_h) / 2
@@ -403,16 +777,18 @@ class ReportFPDF(FPDF):
             for i, cell_data in enumerate(row):
                 if i < len(col_widths):
                     lines = self.multi_cell(
-                        col_widths[i] - 2, line_height, str(cell_data),
-                        dry_run=True, output="LINES"
+                        col_widths[i] - 2,
+                        line_height,
+                        str(cell_data),
+                        dry_run=True,
+                        output="LINES",
                     )
                     num_lines = max(num_lines, len(lines))
             row_height = num_lines * line_height + 4
 
             # Check for page break
-            needs_break = (
-                (max_rows_per_page and rows_on_page >= max_rows_per_page)
-                or (self.get_y() + row_height > self.h - self.b_margin)
+            needs_break = (max_rows_per_page and rows_on_page >= max_rows_per_page) or (
+                self.get_y() + row_height > self.h - self.b_margin
             )
 
             if needs_break:
@@ -432,10 +808,7 @@ class ReportFPDF(FPDF):
 
             # Draw cell backgrounds
             for i, cw in enumerate(col_widths):
-                self.rect(
-                    x_start + sum(col_widths[:i]),
-                    y_start, cw, row_height, "DF"
-                )
+                self.rect(x_start + sum(col_widths[:i]), y_start, cw, row_height, "DF")
 
             # Draw cell text
             self.set_font(self.font_name, "", font_size)
@@ -446,20 +819,30 @@ class ReportFPDF(FPDF):
                 cell_text = str(cell_data)
 
                 # Handle image columns
-                if column_types and i < len(column_types) and column_types[i] == "image":
+                if (
+                    column_types
+                    and i < len(column_types)
+                    and column_types[i] == "image"
+                ):
                     self._draw_image_in_table_cell(
                         cell_text, cell_x, y_start, col_widths[i], row_height
                     )
                 else:
-                    # Center text vertically in cell
+                    # Center text vertically in cell, use column alignment
+                    cell_align = aligns[i] if i < len(aligns) else "L"
                     lines = self.multi_cell(
-                        col_widths[i] - 2, line_height, cell_text,
-                        dry_run=True, output="LINES"
+                        col_widths[i] - 2,
+                        line_height,
+                        cell_text,
+                        dry_run=True,
+                        output="LINES",
                     )
                     text_h = len(lines) * line_height
                     y_pos = y_start + (row_height - text_h) / 2
                     self.set_xy(cell_x + 1, y_pos)
-                    self.multi_cell(col_widths[i] - 2, line_height, cell_text, align="L")
+                    self.multi_cell(
+                        col_widths[i] - 2, line_height, cell_text, align=cell_align
+                    )
 
             self.set_y(y_start + row_height)
             rows_on_page += 1
@@ -502,3 +885,15 @@ class ReportFPDF(FPDF):
                 pass
         # Placeholder
         self._draw_logo_placeholder(img_x, img_y, img_size, img_size)
+
+    # =========================================================================
+    # Cleanup
+    # =========================================================================
+    def cleanup(self) -> None:
+        """Remove temporary files (QR codes, etc.)."""
+        for tmp_path in self._qrcode_tmp_files:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        self._qrcode_tmp_files.clear()

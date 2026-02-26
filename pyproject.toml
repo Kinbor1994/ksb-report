@@ -1,12 +1,29 @@
 [project]
 name = "ksb-report"
 version = "0.1.0"
-description = "API + bibliothèque Python pour générer des rapports PDF 100% personnalisables"
+description = "Python library + API for generating professional, fully customizable PDF reports from JSON."
 authors = [
     {name = "KINNOUME S. Borel", email = "kinnoumeb@gmail.com"}
 ]
+license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
+keywords = ["pdf", "report", "generator", "json", "template", "fpdf2", "invoice"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Printing",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
 dependencies = [
     "fpdf2>=2.8.4,<3.0.0",
     "pydantic>=2.0.0,<3.0.0",
@@ -18,8 +35,17 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0,<9.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
     "httpx>=0.27.0,<1.0.0",
+    "ruff>=0.9.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Kinbor1994/ksb-report"
+Documentation = "https://github.com/Kinbor1994/ksb-report/blob/main/docs/guide.md"
+Repository = "https://github.com/Kinbor1994/ksb-report"
+Issues = "https://github.com/Kinbor1994/ksb-report/issues"
+Changelog = "https://github.com/Kinbor1994/ksb-report/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ksb-report = "ksb_report.cli:main"
@@ -33,3 +59,14 @@ packages = ["src/ksb_report"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
