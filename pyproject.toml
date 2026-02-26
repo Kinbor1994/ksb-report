@@ -49,6 +49,7 @@ Changelog = "https://github.com/Kinbor1994/ksb-report/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ksb-report = "ksb_report.cli:main"
+app = "ksb_report.api:app"
 
 [build-system]
 requires = ["hatchling"]
